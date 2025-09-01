@@ -1,0 +1,353 @@
+---
+title: "Health_Records_Project_Nicholas_Pinero"
+author: "Nicholas Pinero"
+date: "2025-02-04"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This project analyzes simulated hospital health records using R and tidyverse.  
+The goal is to demonstrate a full data science workflow including:
+- Data cleaning and preprocessing
+- Feature engineering
+- Dataset merging
+- Exploratory data analysis
+- Healthcare insights and recommendations
+
+## Datasets:
+
+```{r}
+library(tidyverse)
+
+medications <- read_csv("medications.csv")
+
+messy_health_records <- read_csv("messy_health_records.csv")
+
+patients <- read_csv("patients.csv")
+```
+
+## Data Cleaning and Preprocessing
+
+### 1. Check for missing values:
+
+```{r}
+messy_health_records %>% 
+  summarise(
+    record_id = sum(is.na(record_id)),
+    patient_id = sum(is.na(patient_id)),
+    visit_date = sum(is.na(visit_date)), 
+    condition = sum(is.na(condition)),
+    blood_pressure = sum(is.na(blood_pressure)), 
+    cholesterol_level = sum(is.na(cholesterol_level)),
+    medication_given = sum(is.na(medication_given)),
+    hospital_location = sum(is.na(hospital_location)),
+    patient_age = sum(is.na(patient_age))
+    )
+```
+
+The above code checks if there are missing values in each column and outputs the number of missing values in each column.
+
+### 2. Handle missing values:
+
+```{r}
+cleaned_health_records <- messy_health_records %>% 
+  drop_na()
+
+cleaned_health_records
+```
+
+To handle missing values, I removed rows containing NAs. While imputation could have been considered, dropping missing values was the most straightforward choice given the dataset’s size and structure.
+
+### 3. Convert incorrect data types:
+
+```{r}
+cleaned_health_records <- cleaned_health_records %>%
+  mutate(visit_date = ymd(visit_date))
+
+cleaned_health_records
+```
+
+I mutated the visit_date column of my cleaned_health_records into a date type by using the ymd function which was used in this case because the data was already in a year-month-day format.
+
+### 4. Remove duplicate records
+
+```{r}
+removed_duplicates <- nrow(cleaned_health_records) - nrow(cleaned_health_records %>% unique())
+removed_duplicates
+
+cleaned_health_records <- cleaned_health_records %>% unique()
+cleaned_health_records
+```
+
+To remove duplicate rows I used the unique() function in R. I calculated the number of removed duplicate rows by subtracting the numbers of rows in the original dataset from the number of rows in the non-duplicate dataset. Ultimately there were 140 dupliacte rows that were removed.
+
+### 5. Detect and handle outliers:
+
+```{r}
+IQR_cholesterol <- IQR(cleaned_health_records$cholesterol_level, na.rm = TRUE)
+
+Q1_cholesterol <- quantile(cleaned_health_records$cholesterol_level, probs = 0.25, na.rm = TRUE)
+
+Q3_cholesterol <- quantile(cleaned_health_records$cholesterol_level, probs = 0.75, na.rm = TRUE)
+
+lower_bound_cholesterol <- Q1_cholesterol - 1.5 * IQR_cholesterol
+
+upper_bound_cholesterol <- Q3_cholesterol + 1.5 * IQR_cholesterol
+
+
+IQR_patient_age <- IQR(cleaned_health_records$patient_age, na.rm = TRUE)
+
+Q1_patient_age <- quantile(cleaned_health_records$patient_age, probs = 0.25, na.rm = TRUE)
+
+Q3_patient_age <- quantile(cleaned_health_records$patient_age, probs = 0.75, na.rm = TRUE)
+
+lower_bound_patient_age <- Q1_patient_age - 1.5 * IQR_patient_age
+
+upper_bound_patient_age <- Q3_patient_age + 1.5 * IQR_patient_age
+
+cleaned_health_records <- cleaned_health_records %>% 
+  filter(cholesterol_level >= lower_bound_cholesterol & cholesterol_level <= upper_bound_cholesterol) %>% 
+  filter(patient_age >= lower_bound_patient_age & patient_age <= upper_bound_patient_age)
+
+cleaned_health_records
+```
+
+I used the IQR method to remove outliers. This was done by finding the IQR, Q1, and Q3 values from both the cholesterol_level and patient_age column of the messy_health_data dataset. Upon calculating these values I found the upper and lower bounds of each column using the formulas lower bound = Q1 - 1.5 \* IQR and upper bound = Q3 + 1.5 \* IQR. I finally removed all rows from these two columns that contained values outside of these bounds.
+
+## Data Transformation and Feature Engineering
+
+### 1. Create a new column visit_month:
+
+```{r}
+cleaned_health_records <- cleaned_health_records %>% mutate(visit_month = month(visit_date))
+
+cleaned_health_records
+```
+I added a new column, visit_month, to the cleaned_health_records data set that extracts the month variable from each row of the visit_date column.
+
+### 2. Create a categorical column patient_age_group:
+
+```{r}
+cleaned_health_records <- cleaned_health_records %>% 
+  mutate(patient_age_group = case_when(
+    patient_age >= 18 & patient_age <= 35 ~ "Young", 
+    patient_age >= 36 & patient_age <= 60 ~ "Middle-aged", 
+    patient_age >= 61 ~ "Senior"
+    ))
+
+cleaned_health_records
+```
+
+I added a new column with the mutate() and case_when() functions that checks the age of the patient and assigns the patient either "Young", "Middle-aged", or "Senior" in the new patient_age_group column.
+
+### 3. Create a new column cholesterol_risk:
+
+```{r}
+cleaned_health_records <- cleaned_health_records %>% 
+  mutate(cholesterol_risk = case_when(
+    cholesterol_level < 160 ~ "Low",
+    cholesterol_level >= 160 & cholesterol_level <= 200 ~ "Moderate",
+    cholesterol_level > 200 ~ "High"
+  ))
+
+cleaned_health_records
+```
+
+A new column called "cholesterol_risk" was added with the mutate() function that checks the cholesterol_level column and returns a value using the case_when() in the new column of either "Low", "Moderate", or "High".
+
+### 4. Summarize the number of visits per hospital location and condition:
+
+```{r}
+cleaned_health_records %>% 
+  group_by(hospital_location, condition) %>% 
+  summarise(visits = n()) %>% 
+  pivot_wider(names_from = condition, values_from = visits)
+```
+
+The cleaned_health_records were grouped by the hospital_location and condition columns of the dataset. I then used the pivot_wider() function to widen the the condition column.
+
+## Data Joining and Merging
+
+### 1. Merge the patient dataset:
+
+```{r}
+merged_health_records <- cleaned_health_records %>% 
+  inner_join(patients, by = "patient_id")
+
+glimpse(merged_health_records)
+```
+
+The inner_join() function was used to merge the messy_health_records dataset with the data in the patients dataset that corresponds with the patient_id.
+
+### 2. Merge the medication dataset:
+
+```{r}
+merged_health_records <- merged_health_records %>%
+  inner_join(medications, by = "condition")
+
+glimpse(merged_health_records)
+```
+
+The previously created merged_health_data and the medications data are merged by condition column using the inner_join() function similar to the previous problem.
+
+### 3. Filter out records:
+
+```{r}
+merged_health_records %>% 
+  filter(dosage_mg <= 200)
+```
+I filtered out all rows in merged_health_data that had a dosage_mg greater than 200.
+
+### 4. Identify the top 5 most frequently treated conditions:
+
+```{r}
+merged_health_records %>% 
+  group_by(condition) %>% 
+  summarise(total_treated = n()) %>% 
+  arrange(desc(total_treated)) %>% 
+  head(5)
+```
+The 5 most frequently treated conditions were found by taking the merged_health_data and grouping the data by condition. I then summarized the total amount of patients that were treated for each condition with n(). Finally, I arranged the data in descending order based on total treated patients and then took the top 5 conditions with head(5).
+
+## Exploratory Data Analysis
+
+### 1. What is the average cholesterol level?:
+
+```{r}
+summary_average_cholesterol<- merged_health_records %>% 
+  group_by(patient_age_group) %>% 
+  summarise(average_cholesterol_level = mean(cholesterol_level))
+summary_average_cholesterol
+
+merged_health_records %>% ggplot() + 
+  geom_boxplot(aes(x = patient_age_group, y = cholesterol_level)) +
+  labs(title = "Average Cholesterol Level Per Age Group", 
+       x = "Patient Age Group",
+       y = "Cholesterol Level")
+```
+
+Every age group has a similar average cholesterol level with Middle-aged people having a slightly higher level at 185.7108 than Seniors at 185.2054 and Young at 184.6385.
+
+### 2. What percentage of patients recieved medication?:
+
+```{r}
+summary_medication_percent <- merged_health_records %>% 
+  group_by(medication_given) %>% 
+  summarise(percentage = n()) %>%
+  mutate(percentage = percentage/sum(percentage)*100)
+
+summary_medication_percent %>%
+  ggplot() +
+  geom_col(aes(x = medication_given, y = percentage)) +
+  labs(title = "Percentage of Patients that Recieved Medication",
+       x = "Medication Given",
+       y = "Percentage (%)")
+```
+Around 60% of patients recieved medication during there hospital visit whereas around 40% did not receive medication.
+
+### 3. Which hospital location treated the highest number of patients?:
+
+```{r}
+merged_health_records %>% 
+  group_by(hospital_location) %>%
+  summarise(num_patients = n()) %>%
+  arrange(desc(num_patients))
+```
+The merged_health_records data is grouped my hospital location and summarized by the number of patients treated at each hospital with the n() function. I then arranged the data in descending order. According to the data above, Chicago treated the highest number of patients at 1542.
+
+### 4. Create a time series plot
+
+```{r}
+merged_health_records %>%
+  group_by(visit_month) %>%
+  summarise(total_visits = n()) %>%
+  ggplot(aes(x = visit_month, y = total_visits)) +
+  geom_line() +
+  labs(title = "Total Patient Visits Per Month", 
+       x = "Month",
+       y = "Total Visits") +
+  scale_x_continuous(breaks=seq(1,12,1))
+```
+
+A time series plot that plots total patient visits to the hospital by monthwas created. This was accomplished by grouping the data by visit_month and summarizing the total visits that occurred in each month. I plotted this summarized data into a line plot with visit_month on the x-axis and total_visits on the y-axis to create an easily understandable plot that shows the number of patients that these hospitals receive in each month. According to the data above, total patient visits tends to hover between 600 and 650 every month with the sole exception of December which sees a large decline in total visits dropping close to 400.
+
+## Healthcare Insights and Recomendations
+
+### 1. Which age has the highest cholesterol levels?:
+
+```{r}
+merged_health_records %>%
+  group_by(patient_age_group) %>%
+  summarise(cholesterol_level = mean(cholesterol_level)) %>%
+  arrange(desc(cholesterol_level))
+```
+
+According to the above data, Middle-aged people have the highest cholesterol levels at 185.7108 which is slightly higher than Seniors at 185.2054 and young people at 184.6385. I found this information by grouping my data based on age group and summarizing the mean of the cholesterol levels of each age group and then arrange the new data in descending order.
+
+### 2. Which condition is most frequently treated across all hospitals?:
+
+```{r}
+merged_health_records %>%
+  group_by(hospital_location, condition) %>%
+  summarise(num_condition = n()) %>%
+  arrange(hospital_location, desc(num_condition)) %>%
+  slice(1)
+
+merged_health_records %>%
+  group_by(condition) %>%
+  summarise(num_condition = n()) %>%
+  arrange(desc(num_condition))
+```
+
+According to the data above, diabetes is the most common condition across the entire data set with it also being the most common condtion in NYC. In the other hospital locations Hyptertension is the most common condition in Chicago, asthma is the most common condition in Miami, and obesity is the most common condition in Houstin and LA.
+
+### 3. Recommendations:
+
+Based on our findings, I would encourage patients to listen to their doctor and take medication if it is prescribed. Also, the most common conditions overall were Diabetes and Obesity which can both be cause by unhealthy eating patterns. So one major suggestion I'd have for these patients is to consider exercising regularly and to reach out to a dietitian to create a dietary plan to hopefully either lose weight or reduce the negative effects of these conditions.
+
+## Identifying High-Risk Patients
+
+### 1. I will define high risk as patients with High cholesterol (\>200 mg/dL) AND Stage 2 Hypertension:
+
+```{r}
+high_risk_patients <- merged_health_records %>%
+  filter(cholesterol_level > 200 & blood_pressure == "Stage 2 Hypertension")
+```
+
+I found the highest risk patients by filtering for patients with cholesterol level greater than 200 and blood pressure equal to Stage 2 Hypertension.
+
+### 2. Rank the top 10 most at-risk patients based on cholesterol and blood pressure data:
+
+```{r}
+high_risk_patients %>%
+  arrange(desc(cholesterol_level)) %>%
+  head(10)
+```
+
+I found the top 10 most at-risk patients by taking the previously created high_risk_patients data set and arranging it in descending order based on cholesterol level and then took the top 10 highest risk patients with the head(10) function.
+
+### 3. Provide a scatter plot:
+
+```{r}
+merged_health_records %>%
+  ggplot(aes(x = patient_age, y = cholesterol_level)) +
+  geom_point() +
+  labs(title = "Scatter Plot for Cholesterol Level vs Patient Age",
+       x = "Patient Age",
+       y = "Cholesterol Level")
+```
+
+This scatter plot was created from the merged_health_data previously created showing cholesterol level based on patient age. The scatter plot is very dense and it is clear that there is not a strong correlation between patient age and cholesterol level.
+
+## R Appendix
+```{r, ref.label=knitr::all_labels(), eval=FALSE, echo=TRUE}
+knitr::purl(input = "Report.Rmd", output = "Report.R", documentation = 0)
+```
+
